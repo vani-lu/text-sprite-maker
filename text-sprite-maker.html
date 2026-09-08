@@ -51,6 +51,13 @@
   input[type="color"] {
     width: 44px; height: 30px; border: none; background: none; padding: 0; cursor: pointer;
   }
+  .check-row {
+    display: flex; align-items: center; gap: 10px;
+    cursor: pointer; color: var(--text); font-weight: 400;
+  }
+  .check-row input[type="checkbox"] {
+    width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex: none;
+  }
   .stage {
     display: flex; overflow: auto;
     min-height: 360px; max-height: 520px;
@@ -130,6 +137,12 @@
         <span>文字填充色</span>
       </div>
     </div>
+    <div class="row">
+      <label class="check-row">
+        <input type="checkbox" id="path-mode">
+        <span>把文字转换成路径（避免依赖字体）</span>
+      </label>
+    </div>
   </section>
   <section>
     <div class="stage" id="stage"></div>
@@ -155,6 +168,228 @@ function esc(s) {
           .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+let pathCache = { key: '', d: '' };
+
+function getTextPath(text, font, size, spacing, w, h) {
+  if (!text) return '';
+  const key = `${text}|${font}|${size}|${spacing}|${w}|${h}`;
+  if (pathCache.key === key) return pathCache.d;
+
+  const MAX_CANVAS = 2048;
+  let SCALE = 8;
+  let cw = Math.max(1, Math.floor(w * SCALE));
+  let ch = Math.max(1, Math.floor(h * SCALE));
+  if (cw > MAX_CANVAS || ch > MAX_CANVAS) {
+    SCALE = Math.max(1, Math.floor(MAX_CANVAS / Math.max(w, h)));
+    cw = Math.max(1, Math.floor(w * SCALE));
+    ch = Math.max(1, Math.floor(h * SCALE));
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = ch;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.fillStyle = '#000';
+  ctx.font = `${size * SCALE}px ${font}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  if (typeof ctx.letterSpacing !== 'undefined') {
+    ctx.letterSpacing = `${spacing * SCALE}px`;
+  }
+  ctx.fillText(text, cw / 2, ch / 2);
+
+  const data = ctx.getImageData(0, 0, cw, ch).data;
+  const alpha = new Float32Array(cw * ch);
+  for (let i = 0; i < cw * ch; i++) {
+    alpha[i] = data[i * 4 + 3];
+  }
+
+  const contours = marchingSquares(alpha, cw, ch, 128);
+  if (!contours.length) {
+    pathCache = { key, d: '' };
+    return '';
+  }
+
+  const d = contours.map(pts => {
+    const simplified = rdpSimplify(pts, SCALE * 0.2);
+    if (simplified.length < 3) return '';
+    const centered = simplified.map(p => ({
+      x: (p.x - cw / 2) / SCALE,
+      y: (p.y - ch / 2) / SCALE
+    }));
+    return pointsToSmoothPath(centered);
+  }).filter(s => s).join(' ');
+
+  pathCache = { key, d };
+  return d;
+}
+
+function marchingSquares(alpha, w, h, threshold) {
+  const getAlpha = (x, y) => (x < 0 || x >= w || y < 0 || y >= h) ? 0 : alpha[y * w + x];
+  const segments = [];
+  const pointMap = new Map();
+
+  const keyOf = (p) => `${p.x.toFixed(6)},${p.y.toFixed(6)}`;
+  const addSegment = (p1, p2) => {
+    const idx = segments.length;
+    segments.push([p1, p2]);
+    for (let i = 0; i < 2; i++) {
+      const k = keyOf(i === 0 ? p1 : p2);
+      if (!pointMap.has(k)) pointMap.set(k, []);
+      pointMap.get(k).push({ seg: idx, end: i });
+    }
+  };
+
+  const lerp = (x1, y1, x2, y2, v1, v2) => {
+    const t = (threshold - v1) / (v2 - v1);
+    return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+  };
+
+  for (let y = 0; y < h - 1; y++) {
+    for (let x = 0; x < w - 1; x++) {
+      const tl = getAlpha(x, y);
+      const tr = getAlpha(x + 1, y);
+      const br = getAlpha(x + 1, y + 1);
+      const bl = getAlpha(x, y + 1);
+      const caseIdx = (tl > threshold ? 8 : 0) | (tr > threshold ? 4 : 0) | (br > threshold ? 2 : 0) | (bl > threshold ? 1 : 0);
+      if (caseIdx === 0 || caseIdx === 15) continue;
+
+      const top = lerp(x, y, x + 1, y, tl, tr);
+      const right = lerp(x + 1, y, x + 1, y + 1, tr, br);
+      const bottom = lerp(x, y + 1, x + 1, y + 1, bl, br);
+      const left = lerp(x, y, x, y + 1, tl, bl);
+      const edges = [top, right, bottom, left];
+      const center = (tl + tr + br + bl) / 4;
+
+      let pairs;
+      switch (caseIdx) {
+        case 1: pairs = [[3, 2]]; break;
+        case 2: pairs = [[2, 1]]; break;
+        case 3: pairs = [[3, 1]]; break;
+        case 4: pairs = [[1, 0]]; break;
+        case 5: pairs = center > threshold ? [[0, 3], [1, 2]] : [[0, 1], [2, 3]]; break;
+        case 6: pairs = [[0, 2]]; break;
+        case 7: pairs = [[3, 0]]; break;
+        case 8: pairs = [[0, 3]]; break;
+        case 9: pairs = [[0, 2]]; break;
+        case 10: pairs = center > threshold ? [[0, 1], [2, 3]] : [[0, 3], [1, 2]]; break;
+        case 11: pairs = [[0, 1]]; break;
+        case 12: pairs = [[3, 1]]; break;
+        case 13: pairs = [[2, 1]]; break;
+        case 14: pairs = [[3, 2]]; break;
+      }
+
+      for (const [e1, e2] of pairs) {
+        addSegment(edges[e1], edges[e2]);
+      }
+    }
+  }
+
+  const used = new Array(segments.length).fill(false);
+  const contours = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    if (used[i]) continue;
+    const contour = [];
+    let segIdx = i;
+    let endIdx = 0;
+
+    while (!used[segIdx]) {
+      used[segIdx] = true;
+      const seg = segments[segIdx];
+      contour.push(seg[endIdx]);
+      const nextP = seg[1 - endIdx];
+      const conns = pointMap.get(keyOf(nextP)) || [];
+      let next = null;
+      for (const c of conns) {
+        if (!used[c.seg]) {
+          next = c;
+          break;
+        }
+      }
+      if (!next) break;
+      segIdx = next.seg;
+      endIdx = next.end;
+    }
+
+    if (contour.length > 2) contours.push(contour);
+  }
+
+  return contours;
+}
+
+function pointsToSmoothPath(pts) {
+  if (pts.length < 3) return '';
+  const fmt = (n) => n.toFixed(2);
+  let d = `M ${fmt(pts[0].x)} ${fmt(pts[0].y)}`;
+
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[(i - 1 + pts.length) % pts.length];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[(i + 2) % pts.length];
+
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+
+    d += ` C ${fmt(c1x)} ${fmt(c1y)} ${fmt(c2x)} ${fmt(c2y)} ${fmt(p2.x)} ${fmt(p2.y)}`;
+  }
+
+  const last = pts.length - 1;
+  const p0 = pts[(last - 1 + pts.length) % pts.length];
+  const p1 = pts[last];
+  const p2 = pts[0];
+  const p3 = pts[1];
+
+  const c1x = p1.x + (p2.x - p0.x) / 6;
+  const c1y = p1.y + (p2.y - p0.y) / 6;
+  const c2x = p2.x - (p3.x - p1.x) / 6;
+  const c2y = p2.y - (p3.y - p1.y) / 6;
+
+  d += ` C ${fmt(c1x)} ${fmt(c1y)} ${fmt(c2x)} ${fmt(c2y)} ${fmt(p2.x)} ${fmt(p2.y)} Z`;
+  return d;
+}
+
+function rdpSimplify(pts, epsilon) {
+  if (pts.length <= 2) return pts.slice();
+  let maxDist = 0;
+  let index = 0;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const dx = last.x - first.x;
+  const dy = last.y - first.y;
+  const len2 = dx * dx + dy * dy;
+
+  for (let i = 1; i < pts.length - 1; i++) {
+    const pdx = pts[i].x - first.x;
+    const pdy = pts[i].y - first.y;
+    let dist;
+    if (len2 === 0) {
+      dist = Math.sqrt(pdx * pdx + pdy * pdy);
+    } else {
+      const t = Math.max(0, Math.min(1, (pdx * dx + pdy * dy) / len2));
+      const projX = first.x + t * dx;
+      const projY = first.y + t * dy;
+      dist = Math.sqrt((pts[i].x - projX) ** 2 + (pts[i].y - projY) ** 2);
+    }
+    if (dist > maxDist) {
+      maxDist = dist;
+      index = i;
+    }
+  }
+
+  if (maxDist > epsilon) {
+    const left = rdpSimplify(pts.slice(0, index + 1), epsilon);
+    const right = rdpSimplify(pts.slice(index), epsilon);
+    return left.slice(0, -1).concat(right);
+  }
+
+  return [first, last];
+}
+
 function canvasSize() {
   return {
     w: Math.max(1, +$('cw').value || 64),
@@ -166,14 +401,31 @@ function buildSVG(includeSize) {
   const { w, h } = canvasSize();
   const cx = w / 2 + (+$('dx').value);
   const cy = h / 2 + (+$('dy').value);
+  const sx = $('sx').value;
+  const sy = $('sy').value;
+  const color = $('color').value;
+  const text = $('text').value;
+  const size = +$('size').value;
+  const spacing = +$('spacing').value;
   const sizeAttrs = includeSize ? ` width="${w}" height="${h}"` : '';
+
+  if ($('path-mode').checked) {
+    const d = getTextPath(text, FONT, size, spacing, w, h);
+    if (!d) {
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${sizeAttrs}></svg>`;
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${sizeAttrs}>
+  <path transform="translate(${cx} ${cy}) scale(${sx} ${sy})" d="${d}" fill="${color}" fill-rule="evenodd"/>
+</svg>`;
+  }
+
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${sizeAttrs}>
-  <text transform="translate(${cx} ${cy}) scale(${$('sx').value} ${$('sy').value})"
+  <text transform="translate(${cx} ${cy}) scale(${sx} ${sy})"
         font-family="${FONT}"
-        font-size="${$('size').value}"
-        letter-spacing="${$('spacing').value}"
-        fill="${$('color').value}"
-        text-anchor="middle" dominant-baseline="central">${esc($('text').value)}</text>
+        font-size="${size}"
+        letter-spacing="${spacing}"
+        fill="${color}"
+        text-anchor="middle" dominant-baseline="central">${esc(text)}</text>
 </svg>`;
 }
 
