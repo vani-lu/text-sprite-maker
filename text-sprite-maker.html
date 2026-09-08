@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文字 SVG 生成器 · Arial Rounded MT Bold</title>
+<style>
+  :root {
+    --bg: #1b1e2a;
+    --panel: #262a3a;
+    --panel2: #2e3347;
+    --border: #3a4058;
+    --text: #eef0f6;
+    --muted: #9aa1b5;
+    --accent: #e84393;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header { padding: 18px 24px 10px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+  main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 16px;
+    padding: 8px 24px 24px;
+    align-items: start;
+  }
+  .panel { background: var(--panel); border-radius: 12px; padding: 16px; }
+  .row { margin-bottom: 14px; }
+  .row:last-child { margin-bottom: 0; }
+  .row label {
+    display: flex; justify-content: space-between;
+    font-size: 13px; color: var(--muted); margin-bottom: 6px;
+  }
+  .row label output { color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type="text"], input[type="number"] {
+    width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 14px;
+  }
+  input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .canvas-inputs { display: flex; gap: 8px; align-items: center; }
+  .canvas-inputs span { color: var(--muted); font-size: 13px; }
+  .color-row { display: flex; align-items: center; gap: 10px; }
+  .color-row span { font-size: 13px; color: var(--muted); }
+  input[type="color"] {
+    width: 44px; height: 30px; border: none; background: none; padding: 0; cursor: pointer;
+  }
+  .stage {
+    display: flex; overflow: auto;
+    min-height: 360px; max-height: 520px;
+    padding: 16px; border-radius: 12px;
+    background: repeating-conic-gradient(#20242f 0% 25%, #282c3e 0% 50%) 0 0 / 24px 24px;
+  }
+  .stage svg {
+    display: block; flex: none; margin: auto;
+    outline: 1px dashed #525a78;
+  }
+  .stage .hint { color: var(--muted); font-size: 14px; margin: auto; }
+  .meta { margin-top: 8px; text-align: center; color: var(--muted); font-size: 12px; }
+  .actions { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    flex: 1; padding: 10px; border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .primary { background: var(--accent); color: #fff; }
+  .primary:disabled { opacity: .4; cursor: default; }
+  .ghost { background: var(--panel2); color: var(--text); }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  pre {
+    background: #14161f; border-radius: 8px; padding: 12px;
+    font-size: 11px; line-height: 1.5; overflow: auto; max-height: 220px; color: #c8cede;
+    white-space: pre-wrap; word-break: break-all;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>文字 SVG 生成器</h1>
+  <p>字体:Arial Rounded MT Bold(macOS 自带)· 默认居中,viewBox 与精灵一致的 64×64</p>
+</header>
+<main>
+  <section class="panel">
+    <div class="row">
+      <label>文字内容</label>
+      <input type="text" id="text" value="BABA" autocomplete="off">
+    </div>
+    <div class="row">
+      <label>画布大小 (宽 × 高)</label>
+      <div class="canvas-inputs">
+        <input type="number" id="cw" value="64" min="8" max="512">
+        <span>×</span>
+        <input type="number" id="ch" value="64" min="8" max="512">
+      </div>
+    </div>
+    <div class="row">
+      <label>字号 <output id="size-v"></output></label>
+      <input type="range" id="size" min="4" max="100" step="0.5" value="20">
+    </div>
+    <div class="row">
+      <label>字符间距 <output id="spacing-v"></output></label>
+      <input type="range" id="spacing" min="-2" max="16" step="0.5" value="0">
+    </div>
+    <div class="row">
+      <label>水平位移 <output id="dx-v"></output></label>
+      <input type="range" id="dx" min="-32" max="32" step="0.5" value="0">
+    </div>
+    <div class="row">
+      <label>垂直位移 <output id="dy-v"></output></label>
+      <input type="range" id="dy" min="-32" max="32" step="0.5" value="0">
+    </div>
+    <div class="row">
+      <label>横向拉伸 <output id="sx-v"></output></label>
+      <input type="range" id="sx" min="0.2" max="3" step="0.05" value="1">
+    </div>
+    <div class="row">
+      <label>纵向拉伸 <output id="sy-v"></output></label>
+      <input type="range" id="sy" min="0.2" max="3" step="0.05" value="1">
+    </div>
+    <div class="row">
+      <label>颜色</label>
+      <div class="color-row">
+        <input type="color" id="color" value="#ffffff">
+        <span>文字填充色</span>
+      </div>
+    </div>
+  </section>
+  <section>
+    <div class="stage" id="stage"></div>
+    <div class="meta" id="meta"></div>
+    <div class="actions">
+      <button class="primary" id="download">下载 SVG</button>
+      <button class="ghost" id="copy">复制 SVG 代码</button>
+    </div>
+    <details>
+      <summary>查看 SVG 代码</summary>
+      <pre id="code"></pre>
+    </details>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const FONT = "'Arial Rounded MT Bold','Arial Rounded MT','Helvetica Rounded',Arial,sans-serif";
+const RANGE_IDS = ['size', 'spacing', 'dx', 'dy', 'sx', 'sy'];
+const ZOOM = 4; // 预览缩放:1 画布单位 = 4px
+
+function esc(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function canvasSize() {
+  return {
+    w: Math.max(1, +$('cw').value || 64),
+    h: Math.max(1, +$('ch').value || 64),
+  };
+}
+
+function buildSVG(includeSize) {
+  const { w, h } = canvasSize();
+  const cx = w / 2 + (+$('dx').value);
+  const cy = h / 2 + (+$('dy').value);
+  const sizeAttrs = includeSize ? ` width="${w}" height="${h}"` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${sizeAttrs}>
+  <text transform="translate(${cx} ${cy}) scale(${$('sx').value} ${$('sy').value})"
+        font-family="${FONT}"
+        font-size="${$('size').value}"
+        letter-spacing="${$('spacing').value}"
+        fill="${$('color').value}"
+        text-anchor="middle" dominant-baseline="central">${esc($('text').value)}</text>
+</svg>`;
+}
+
+function render() {
+  for (const id of RANGE_IDS) $(id + '-v').textContent = $(id).value;
+  const { w, h } = canvasSize();
+  const hasText = $('text').value.length > 0;
+  $('stage').innerHTML = hasText
+    ? buildSVG(false)
+    : '<span class="hint">在左侧输入文字…</span>';
+  const svgEl = $('stage').querySelector('svg');
+  if (svgEl) {
+    svgEl.style.width = (w * ZOOM) + 'px';
+    svgEl.style.height = (h * ZOOM) + 'px';
+  }
+  $('meta').textContent = hasText ? `画布 ${w} × ${h} · 预览 ${ZOOM}×(${w * ZOOM} × ${h * ZOOM} px)` : '';
+  $('code').textContent = hasText ? buildSVG(true) : '';
+  $('download').disabled = !hasText;
+}
+
+function syncOffsetRanges() {
+  const { w, h } = canvasSize();
+  $('dx').min = -w / 2; $('dx').max = w / 2;
+  $('dy').min = -h / 2; $('dy').max = h / 2;
+}
+
+document.querySelectorAll('input').forEach(el =>
+  el.addEventListener('input', () => {
+    if (el.id === 'cw' || el.id === 'ch') syncOffsetRanges();
+    render();
+  })
+);
+
+$('download').addEventListener('click', () => {
+  const blob = new Blob([buildSVG(true)], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  const name = $('text').value.trim().replace(/[^\w-]+/g, '_') || 'text';
+  a.href = URL.createObjectURL(blob);
+  a.download = name + '.svg';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$('copy').addEventListener('click', async () => {
+  if (!$('text').value) return;
+  await navigator.clipboard.writeText(buildSVG(true));
+  $('copy').textContent = '已复制!';
+  setTimeout(() => { $('copy').textContent = '复制 SVG 代码'; }, 1200);
+});
+
+syncOffsetRanges();
+render();
+</script>
+</body>
+</html>
