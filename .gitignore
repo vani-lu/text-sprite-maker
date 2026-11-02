@@ -1,0 +1,5 @@
+# Local font files (do not commit or push)
+/setofont/
+
+# macOS metadata
+.DS_Store

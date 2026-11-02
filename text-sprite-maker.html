@@ -3,8 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>文字 SVG 生成器 · Arial Rounded MT Bold</title>
+<title>文字 SVG 生成器</title>
 <style>
+  @font-face {
+    font-family: 'SetoFont';
+    src: url('./setofont/setofont.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+  }
   :root {
     --bg: #1b1e2a;
     --panel: #262a3a;
@@ -39,11 +45,12 @@
     font-size: 13px; color: var(--muted); margin-bottom: 6px;
   }
   .row label output { color: var(--text); font-variant-numeric: tabular-nums; }
-  input[type="text"], input[type="number"] {
+  input[type="text"], input[type="number"], select {
     width: 100%; background: var(--panel2); border: 1px solid var(--border);
     color: var(--text); border-radius: 8px; padding: 8px 10px; font-size: 14px;
   }
   input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+  .font-status { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
   .canvas-inputs { display: flex; gap: 8px; align-items: center; }
   .canvas-inputs span { color: var(--muted); font-size: 13px; }
   .color-row { display: flex; align-items: center; gap: 10px; }
@@ -76,7 +83,7 @@
     font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .primary { background: var(--accent); color: #fff; }
-  .primary:disabled { opacity: .4; cursor: default; }
+  button:disabled { opacity: .4; cursor: default; }
   .ghost { background: var(--panel2); color: var(--text); }
   details { margin-top: 14px; }
   summary { cursor: pointer; color: var(--muted); font-size: 13px; }
@@ -90,13 +97,21 @@
 <body>
 <header>
   <h1>文字 SVG 生成器</h1>
-  <p>字体:Arial Rounded MT Bold(macOS 自带)· 默认居中,viewBox 与精灵一致的 64×64</p>
+  <p>可选择字体 · 默认居中,viewBox 与精灵一致的 64×64</p>
 </header>
 <main>
   <section class="panel">
     <div class="row">
       <label>文字内容</label>
       <input type="text" id="text" value="BABA" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="font">字体</label>
+      <select id="font">
+        <option value="arial">Arial Rounded MT Bold</option>
+        <option value="seto">Seto Font（濑户字体）</option>
+      </select>
+      <p class="font-status" id="font-status" role="status"></p>
     </div>
     <div class="row">
       <label>画布大小 (宽 × 高)</label>
@@ -159,7 +174,32 @@
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const FONT = "'Arial Rounded MT Bold','Arial Rounded MT','Helvetica Rounded',Arial,sans-serif";
+const FONTS = {
+  arial: "'Arial Rounded MT Bold','Arial Rounded MT','Helvetica Rounded',Arial,sans-serif",
+  seto: "'SetoFont',sans-serif",
+};
+let fontLoading = false;
+let fontRequest = 0;
+
+async function selectFont() {
+  const request = ++fontRequest;
+  fontLoading = $('font').value === 'seto';
+  $('font-status').textContent = fontLoading ? '正在加载 Seto Font…' : '';
+  render();
+  if (!fontLoading) return;
+  try {
+    await document.fonts.load('20px "SetoFont"');
+    if (request !== fontRequest) return;
+    $('font-status').textContent = 'Seto Font 已加载。跨设备使用 SVG 时，请勾选转换成路径。';
+  } catch (error) {
+    if (request !== fontRequest) return;
+    $('font').value = 'arial';
+    $('font-status').textContent = '无法加载 Seto Font，请确认 setofont/setofont.ttf 存在。已切回 Arial Rounded。';
+  }
+  fontLoading = false;
+  pathCache = { key: '', d: '' };
+  render();
+}
 const RANGE_IDS = ['size', 'spacing', 'dx', 'dy', 'sx', 'sy'];
 const ZOOM = 4; // 预览缩放:1 画布单位 = 4px
 
@@ -407,10 +447,11 @@ function buildSVG(includeSize) {
   const text = $('text').value;
   const size = +$('size').value;
   const spacing = +$('spacing').value;
+  const font = FONTS[$('font').value];
   const sizeAttrs = includeSize ? ` width="${w}" height="${h}"` : '';
 
   if ($('path-mode').checked) {
-    const d = getTextPath(text, FONT, size, spacing, w, h);
+    const d = getTextPath(text, font, size, spacing, w, h);
     if (!d) {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${sizeAttrs}></svg>`;
     }
@@ -421,7 +462,7 @@ function buildSVG(includeSize) {
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}"${sizeAttrs}>
   <text transform="translate(${cx} ${cy}) scale(${sx} ${sy})"
-        font-family="${FONT}"
+        font-family="${font}"
         font-size="${size}"
         letter-spacing="${spacing}"
         fill="${color}"
@@ -433,7 +474,9 @@ function render() {
   for (const id of RANGE_IDS) $(id + '-v').textContent = $(id).value;
   const { w, h } = canvasSize();
   const hasText = $('text').value.length > 0;
-  $('stage').innerHTML = hasText
+  $('stage').innerHTML = fontLoading
+    ? '<span class="hint">正在加载字体…</span>'
+    : hasText
     ? buildSVG(false)
     : '<span class="hint">在左侧输入文字…</span>';
   const svgEl = $('stage').querySelector('svg');
@@ -442,8 +485,9 @@ function render() {
     svgEl.style.height = (h * ZOOM) + 'px';
   }
   $('meta').textContent = hasText ? `画布 ${w} × ${h} · 预览 ${ZOOM}×(${w * ZOOM} × ${h * ZOOM} px)` : '';
-  $('code').textContent = hasText ? buildSVG(true) : '';
-  $('download').disabled = !hasText;
+  $('code').textContent = hasText && !fontLoading ? buildSVG(true) : '';
+  $('download').disabled = !hasText || fontLoading;
+  $('copy').disabled = !hasText || fontLoading;
 }
 
 function syncOffsetRanges() {
@@ -458,6 +502,8 @@ document.querySelectorAll('input').forEach(el =>
     render();
   })
 );
+
+$('font').addEventListener('change', selectFont);
 
 $('download').addEventListener('click', () => {
   const blob = new Blob([buildSVG(true)], { type: 'image/svg+xml' });

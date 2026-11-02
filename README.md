@@ -5,6 +5,7 @@ A tiny browser-based tool for generating text SVGs. Useful for making crisp, sca
 ## Features
 
 - Live preview with a dark interface
+- Choose Arial Rounded MT Bold or the local Seto Font
 - Adjustable canvas size, font size, letter spacing, position, and scaling
 - Pick any fill color
 - Download as `.svg` or copy the SVG code to the clipboard
@@ -20,3 +21,9 @@ No build step or server is required; everything runs locally in the browser.
 ## File
 
 - `text-sprite-maker.html` — the complete tool in a single file
+
+## Local Seto Font
+
+Place `setofont.ttf` in `setofont/` beside the HTML file, then choose **Seto Font** in the font selector. The entire `setofont/` folder is ignored by Git and is not included in commits or pushes; other checkouts need their own local copy.
+
+Text-mode SVGs require the selected font on the viewing device (Seto uses the family name `SetoFont`). Enable **把文字转换成路径** before exporting to make an SVG that does not depend on the font being installed or loaded.
